@@ -107,12 +107,11 @@ open-related-file-groups."
 
 (defun open-related-file-open ()
   "Try to match current-buffer's filepath with elements of 'open-related-file-groups.
-Do nothing if none matches. If match found, open the files."
+If match found and all files exist, open the files. Do nothing otherwise."
   (interactive)
   (let* ((original-filepath (buffer-file-name))
          (file-group (orf-find-matched-file-paths original-filepath)))
-    (when (and file-group
-               (loop for f in file-group always (file-exists-p f)))
+    (when (and file-group (every 'file-exists-p file-group))
       (let ((args (cons original-filepath file-group)))
         (when (equal 2 (length file-group))
           (apply 'orf-open-matched-files-2 args))
@@ -124,15 +123,12 @@ Do nothing if none matches. If match found, open the files."
 
 ;; private functions
 (defun orf-find-matched-file-paths (filepath)
-  (let* ((matched-group (orf-find-matching-group filepath))
-         (matched-patterns (orf-matched-substrings filepath)))
-    (loop for f in matched-group collect
-          (eval (append '(format f) matched-patterns)))))
-
-(defun orf-find-matching-group (filepath)
   (loop for group in open-related-file-groups do
         (when (orf-test-group-with-filepath group filepath)
-          (return group))))
+          (let* ((matched-patterns (orf-matched-substrings filepath))
+                 (matched-files    (orf-matched-filepaths group matched-patterns)))
+            (when (every 'file-exists-p matched-files)
+              (return matched-files))))))
 
 (defun orf-test-group-with-filepath (group filepath)
   (loop for file-pattern in group do
@@ -147,6 +143,10 @@ Do nothing if none matches. If match found, open the files."
 (defun orf-matched-substrings (orig-str)
   (loop for i from 1 while (match-string i orig-str) collect
         (match-string i orig-str)))
+
+(defun orf-matched-filepaths (group matched-patterns)
+  (loop for f in group collect
+        (eval (append '(format f) matched-patterns))))
 
 (defun orf-open-matched-files-2 (original-filepath file-l file-r)
   (delete-other-windows)
@@ -165,8 +165,8 @@ Do nothing if none matches. If match found, open the files."
   (find-file file-r1)
   (other-window 1)
   (find-file file-r2)
-  (when (equal original-filepath file-l)  (other-window 1))
-  (when (equal original-filepath file-r1) (other-window -1)))
+  (cond ((equal original-filepath file-l)  (other-window  1))
+        ((equal original-filepath file-r1) (other-window -1))))
 
 (defun orf-open-matched-files-4 (original-filepath file-l1 file-l2 file-r1 file-r2)
   (delete-other-windows)
@@ -180,9 +180,9 @@ Do nothing if none matches. If match found, open the files."
   (find-file file-r1)
   (other-window 1)
   (find-file file-r2)
-  (when (equal original-filepath file-l1) (other-window 1))
-  (when (equal original-filepath file-l2) (other-window 2))
-  (when (equal original-filepath file-r1) (other-window -1)))
+  (cond ((equal original-filepath file-l1) (other-window  1))
+        ((equal original-filepath file-l2) (other-window  2))
+        ((equal original-filepath file-r1) (other-window -1))))
 
 (provide 'open-related-file)
 ;;; open-related-file.el ends here
