@@ -41,17 +41,17 @@
 ;; Example 1: Simple 1-to-1 mapping
 ;;     (open-related-file-append-group "/home/someone/somewhere/abc.foo" "/home/someone/somewhere/abc.bar")
 ;;
-;; Example 2: Use wildcard "%s"
-;;     (open-related-file-append-group "%s.foo" "%s.bar")
+;; Example 2: Using wildcards: "%1" "%2", ... , "%9"
+;;     (open-related-file-append-group "%1_%2.foo" "%1_%2.bar")
 ;;
-;; Example 3: Add a group containing 3 or 4 paths
-;;     (open-related-file-append-group "%s.1" "%s.2" "%s.3")
-;;     (open-related-file-append-group "%s.1" "%s.2" "%s.3" "%s.4")
+;; Example 3: Groups containing 3 or 4 paths
+;;     (open-related-file-append-group "%1.aaa" "%1.bbb" "%1.ccc")
+;;     (open-related-file-append-group "%1.aaa" "%1.bbb" "%1.ccc" "%1.ddd")
 ;;
 ;; Example 4: For Rails developers (with Test::Unit)
-;;     (open-related-file-append-group "%s/app/controllers/%s.rb" "%s/test/functional/%s_test.rb"  )
-;;     (open-related-file-append-group "%s/app/helpers/%s.rb"     "%s/test/unit/helpers/%s_test.rb")
-;;     (open-related-file-append-group "%s/app/models/%s.rb"      "%s/test/unit/%s_test.rb"        )
+;;     (open-related-file-append-group "%1/app/controllers/%2.rb" "%1/test/functional/%2_test.rb"  )
+;;     (open-related-file-append-group "%1/app/helpers/%2.rb"     "%1/test/unit/helpers/%2_test.rb")
+;;     (open-related-file-append-group "%1/app/models/%2.rb"      "%1/test/unit/%2_test.rb"        )
 ;;     ...
 ;;
 ;;; Resulting layout:
@@ -106,7 +106,7 @@ open-related-file-groups."
   (add-to-list 'open-related-file-groups new-group t))
 
 (defun open-related-file-open ()
-  "Try to match current-buffer's filepath with elements of 'open-related-file-groups.
+  "Try to match current-buffer's filepath with elements of open-related-file-groups.
 If match found and all files exist, open the files. Do nothing otherwise."
   (interactive)
   (let* ((original-filepath (buffer-file-name))
@@ -127,29 +127,51 @@ If match found and all files exist, open the files. Do nothing otherwise."
 ;; private functions
 (defun orf-find-matched-file-paths (filepath)
   (loop for group in open-related-file-groups do
-        (when (orf-test-group-with-filepath group filepath)
-          (let* ((matched-patterns (orf-matched-substrings filepath))
-                 (matched-files    (orf-matched-filepaths group matched-patterns)))
-            (when (every 'file-exists-p matched-files)
-              (return matched-files))))))
+        (let ((match-mapping-alist (orf-test-group-with-filepath group filepath)))
+          (when match-mapping-alist
+            (let ((matched-files (orf-matched-filepaths group match-mapping-alist)))
+              (when (every 'file-exists-p matched-files)
+                (return matched-files)))))))
 
 (defun orf-test-group-with-filepath (group filepath)
   (loop for file-pattern in group do
         (let ((file-regexp (orf-construct-path-regexp file-pattern)))
-          (when (string-match file-regexp filepath) (return t)))))
+          (when (string-match file-regexp filepath)
+            (return (orf-get-match-mapping-alist file-pattern filepath))))))
 
 (defun orf-construct-path-regexp (path)
-  (let* ((path-with-escaped-dots    (replace-regexp-in-string "\\." "\\\\."        path))
-         (path-with-regexp-grouping (replace-regexp-in-string "%s"  "\\\\(.*\\\\)" path-with-escaped-dots)))
+  (let* ((path-with-escaped-dots    (replace-regexp-in-string "\\."    "\\\\."        path))
+         (path-with-regexp-grouping (replace-regexp-in-string "%[1-9]" "\\\\(.*\\\\)" path-with-escaped-dots)))
     (concat "^" path-with-regexp-grouping "$")))
+
+(defun orf-get-match-mapping-alist (orig-pattern path)
+  (let* ((matched-strings (orf-matched-substrings path))
+         (i 0)
+         (matched-subs (loop while (setq i (string-match "\\(%[1-9]\\)" orig-pattern i)) collect
+                             (progn
+                               (setq i (1+ i))
+                               (match-string 1 orig-pattern)))))
+    (orf-make-alist-from-lists matched-subs matched-strings)))
+
+(defun orf-make-alist-from-lists (l1 l2)
+  (if (or (null l1) (null l2))
+      '()
+    (cons (cons (car l1) (car l2)) (orf-make-alist-from-lists (cdr l1) (cdr l2)))))
 
 (defun orf-matched-substrings (orig-str)
   (loop for i from 1 while (match-string i orig-str) collect
         (match-string i orig-str)))
 
-(defun orf-matched-filepaths (group matched-patterns)
+(defun orf-matched-filepaths (group match-mapping-alist)
   (loop for f in group collect
-        (eval (append '(format f) matched-patterns))))
+        (orf-matched-filepath f match-mapping-alist)))
+
+(defun orf-matched-filepath (path match-mapping-alist)
+  (loop for pair in match-mapping-alist do
+        (let ((percent-wildcard (car pair))
+              (replace-str      (cdr pair)))
+          (setq path (replace-regexp-in-string percent-wildcard replace-str path))))
+  path)
 
 (defun orf-open-matched-files-2 (original-filepath file-l file-r)
   (delete-other-windows)
@@ -188,4 +210,3 @@ If match found and all files exist, open the files. Do nothing otherwise."
         ((equal original-filepath file-r1) (other-window -1))))
 
 (provide 'open-related-file)
-;;; open-related-file.el ends here
